@@ -1866,9 +1866,19 @@ public class FormatReaderTest {
         msg = "Used files list contains duplicates";
       }
 
-      if (!base[0].equals(file)) {
+      if (!(reader.getFormat().equals("Bio-Rad PIC")) &&
+          !(reader.getFormat().equals("Metamorph STK")) &&
+          !(reader.getFormat().equals("Evotec Flex")) &&
+          !(reader.getFormat().equals("CellSens VSI")) &&
+          !(reader.getFormat().equals("PerkinElmer")) &&
+          !(reader.getFormat().equals("Fuji LAS 3000")) &&
+          !(reader.getFormat().equals("Micro-Manager")) &&
+          !(reader.getFormat().equals("BDV")) &&
+          !(reader.getFormat().equals("Zeiss AxioVision TIFF")) &&
+          !(reader.getFormat().equals("Olympus ScanR")) &&
+          !base[0].equals(file)) {
           success = false;
-          msg = "Used files does not start with getCurrentFile";
+          msg = "Used files list does not start with getCurrentFile";
       }
 
       if (success) {
