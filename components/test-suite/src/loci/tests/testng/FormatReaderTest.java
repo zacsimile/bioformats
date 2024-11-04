@@ -1866,10 +1866,22 @@ public class FormatReaderTest {
         msg = "Used files list contains duplicates";
       }
 
-      if (base.length == 1) {
-        if (!base[0].equals(file)) success = false;
+      if (!(reader.getFormat().equals("Bio-Rad PIC")) &&
+          !(reader.getFormat().equals("Metamorph STK")) &&
+          !(reader.getFormat().equals("Evotec Flex")) &&
+          !(reader.getFormat().equals("CellSens VSI")) &&
+          !(reader.getFormat().equals("PerkinElmer")) &&
+          !(reader.getFormat().equals("Fuji LAS 3000")) &&
+          !(reader.getFormat().equals("Micro-Manager")) &&
+          !(reader.getFormat().equals("BDV")) &&
+          !(reader.getFormat().equals("Zeiss AxioVision TIFF")) &&
+          !(reader.getFormat().equals("Olympus ScanR")) &&
+          !base[0].equals(file)) {
+          success = false;
+          msg = "Used files list does not start with getCurrentFile";
       }
-      else if (success) {
+
+      if (success) {
         Arrays.sort(base);
         IFormatReader r =
           /*config.noStitching() ? new ImageReader() :*/ new ImageReader();
