@@ -1153,12 +1153,11 @@ public class ImageInfo {
         }
       }
       scanner.close();
+      System.exit(exitCode);
     }
     else {
       if (!new ImageInfo().testRead(args)) System.exit(1);
     }
-
-    System.exit(exitCode);
   }
 }
 
