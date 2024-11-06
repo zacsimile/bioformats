@@ -247,6 +247,7 @@ public class TCSReader extends FormatReader {
     Arrays.sort(list);
 
     boolean isXML = checkSuffix(id, XML_SUFFIX);
+    if (isXML) xmlFile = l.getAbsolutePath();
 
     if (list != null) {
       for (String file : list) {
@@ -255,13 +256,16 @@ public class TCSReader extends FormatReader {
           break;
         }
         else if (checkSuffix(file, TiffReader.TIFF_SUFFIXES) && isXML) {
+          // this will result in a call to super.initFile(...),
+          // which calls close and resets xmlFile
+          // so xmlFile must be reset here before returning,
+          // otherwise the XML file will not appear on the used files list
           initFile(new Location(parent, file).getAbsolutePath());
+          xmlFile = l.getAbsolutePath();
           return;
         }
       }
     }
-
-    if (isXML) xmlFile = l.getAbsolutePath();
 
     super.initFile(id);
 
