@@ -729,11 +729,10 @@ public class OperettaReader extends FormatReader {
             FormatTools.getPhysicalSizeY(first.resolutionY), i);
 
           if (getSizeZ() > 1 && last != null) {
-            Unit<Length> firstZUnit = first.positionZ.unit();
-            double firstZ = first.positionZ.value().doubleValue();
-            double lastZ = last.positionZ.value(firstZUnit).doubleValue();
+            double firstZ = first.positionZ.value(UNITS.MICROMETER).doubleValue();
+            double lastZ = last.positionZ.value(UNITS.MICROMETER).doubleValue();
             double averageStep = (lastZ - firstZ) / (getSizeZ() - 1);
-            store.setPixelsPhysicalSizeZ(FormatTools.getPhysicalSizeZ(averageStep, firstZUnit), i);
+            store.setPixelsPhysicalSizeZ(FormatTools.getPhysicalSizeZ(averageStep, UNITS.MICROMETER), i);
           }
         }
       }
