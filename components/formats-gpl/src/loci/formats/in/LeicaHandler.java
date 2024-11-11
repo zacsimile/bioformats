@@ -202,8 +202,10 @@ public class LeicaHandler extends BaseHandler {
       if (level != MetadataLevel.MINIMUM) {
         int nChannels = coreMeta.rgb ? 0 : numChannels;
 
-        for (int c=0; c<nChannels; c++) {
-          store.setChannelPinholeSize(new Length(pinhole, UNITS.MICROMETER), numDatasets, c);
+        if (pinhole != null) {
+          for (int c=0; c<nChannels; c++) {
+            store.setChannelPinholeSize(new Length(pinhole, UNITS.MICROMETER), numDatasets, c);
+          }
         }
 
         for (int i=0; i<xPos.size(); i++) {
@@ -256,8 +258,10 @@ public class LeicaHandler extends BaseHandler {
           String id = MetadataTools.createLSID("Detector", numDatasets, index);
           store.setDetectorSettingsID(id, numDatasets, index);
         }
-        for (int c=0; c<nChannels; c++) {
-          store.setChannelPinholeSize(new Length(pinhole, UNITS.MICROMETER), numDatasets, c);
+        if (pinhole != null) {
+          for (int c=0; c<nChannels; c++) {
+            store.setChannelPinholeSize(new Length(pinhole, UNITS.MICROMETER), numDatasets, c);
+          }
         }
       }
     }
