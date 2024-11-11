@@ -246,28 +246,29 @@ public class TCSReader extends FormatReader {
     String[] list = parent.list();
     Arrays.sort(list);
 
+    String currentXMLFile = null;
+
     boolean isXML = checkSuffix(id, XML_SUFFIX);
-    if (isXML) xmlFile = l.getAbsolutePath();
+    if (isXML) currentXMLFile = l.getAbsolutePath();
 
     if (list != null) {
       for (String file : list) {
         if (checkSuffix(file, XML_SUFFIX) && !isXML && isGroupFiles()) {
-          xmlFile = new Location(parent, file).getAbsolutePath();
+          currentXMLFile = new Location(parent, file).getAbsolutePath();
           break;
         }
         else if (checkSuffix(file, TiffReader.TIFF_SUFFIXES) && isXML) {
-          // this will result in a call to super.initFile(...),
-          // which calls close and resets xmlFile
-          // so xmlFile must be reset here before returning,
-          // otherwise the XML file will not appear on the used files list
           initFile(new Location(parent, file).getAbsolutePath());
-          xmlFile = l.getAbsolutePath();
           return;
         }
       }
     }
 
+    // super.initFile(...) calls close, which resets xmlFile
+    // so xmlFile must be set after super.initFile(...) returns,
+    // otherwise the XML file will not appear on the used files list
     super.initFile(id);
+    xmlFile = currentXMLFile;
 
     MetadataStore store = makeFilterMetadata();
 
