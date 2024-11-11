@@ -120,6 +120,9 @@ public class LeicaHandler extends BaseHandler {
   private MetadataLevel level;
   private int laserCount = 0;
 
+  private Map<String, Time> exposureTimes = new HashMap<String, Time>();
+  private Map<String, Time> deltaT = new HashMap<String, Time>();
+
   // -- Constructor --
 
   public LeicaHandler(MetadataStore store, MetadataLevel level) {
@@ -143,6 +146,10 @@ public class LeicaHandler extends BaseHandler {
   public Hashtable getGlobalMetadata() { return globalMetadata; }
 
   public Vector<String> getLutNames() { return lutNames; }
+
+  public Map<String, Time> getExposureTimes() { return exposureTimes; }
+
+  public Map<String, Time> getDeltaT() { return deltaT; }
 
   // -- DefaultHandler API methods --
 
@@ -549,7 +556,7 @@ public class LeicaHandler extends BaseHandler {
           try {
             Double exposureTime = DataTools.parseDouble(value);
             if (exposureTime != null) {
-              store.setPlaneExposureTime(new Time(exposureTime, UNITS.SECOND), numDatasets, c);
+              exposureTimes.put(numDatasets + "-" + c, new Time(exposureTime, UNITS.SECOND));
             }
           }
           catch (IndexOutOfBoundsException e) { }
@@ -878,14 +885,14 @@ public class LeicaHandler extends BaseHandler {
           store.setImageAcquisitionDate(new Timestamp(date), numDatasets);
         }
         firstStamp = ms;
-        store.setPlaneDeltaT(new Time(0.0, UNITS.SECOND), numDatasets, count);
+        deltaT.put(numDatasets + "-" + count, new Time(0.0, UNITS.SECOND));
       }
       else if (level != MetadataLevel.MINIMUM) {
         CoreMetadata coreMeta = core.get(numDatasets);
         int nImages = coreMeta.sizeZ * coreMeta.sizeT * coreMeta.sizeC;
         if (count < nImages) {
           ms -= firstStamp;
-          store.setPlaneDeltaT(new Time(ms / 1000.0, UNITS.SECOND), numDatasets, count);
+          deltaT.put(numDatasets + "-" + count, new Time(ms / 1000.0, UNITS.SECOND));
         }
       }
 
@@ -897,7 +904,8 @@ public class LeicaHandler extends BaseHandler {
       if (count < nImages) {
         Double time = DataTools.parseDouble(attributes.getValue("Time"));
         if (time != null) {
-          store.setPlaneDeltaT(new Time(time, UNITS.SECOND), numDatasets, count++);
+          deltaT.put(numDatasets + "-" + count, new Time(time, UNITS.SECOND));
+          count++;
         }
       }
     }
