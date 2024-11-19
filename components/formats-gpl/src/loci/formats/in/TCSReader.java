@@ -476,7 +476,7 @@ public class TCSReader extends FormatReader {
       xml = XMLTools.sanitizeXML(PREFIX + xml + SUFFIX);
 
       LeicaHandler handler =
-        new LeicaHandler(store, getMetadataOptions().getMetadataLevel());
+        new LeicaHandler(store, getMetadataOptions().getMetadataLevel(), false);
       XMLTools.parseXML(xml, handler);
       exposureTime = handler.getExposureTimes();
       deltaT = handler.getDeltaT();
