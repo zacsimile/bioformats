@@ -5,8 +5,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-import com.sun.media.jfxmedia.logging.Logger;
-
 import loci.common.Location;
 import loci.common.RandomAccessInputStream;
 import loci.formats.CoreMetadata;
@@ -101,6 +99,7 @@ public class DCIMGReader extends FormatReader {
       stream.skipBytes(byteFactor*(getSizeX() - w - x));
     }
 
+    stream.close();
     return buf;
   }
 
