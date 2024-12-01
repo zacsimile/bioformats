@@ -17,7 +17,8 @@ import loci.formats.meta.MetadataStore;
 /**
  * DCIMGReader reads Hamamatsu DCIMG files.
  * 
- * Follows spec in https://github.com/python-microscopy/python-microscopy/blob/master/PYME/IO/dcimg.py.
+ * Follows spec at https://github.com/python-microscopy/python-microscopy/blob/master/PYME/IO/dcimg.py
+ * and https://github.com/lens-biophotonics/dcimg/blob/master/dcimg.py.
  */
 public class DCIMGReader extends FormatReader {
 
@@ -25,18 +26,18 @@ public class DCIMGReader extends FormatReader {
 
   private static final boolean IS_LITTLE = true;
 
-  private static final long DCAM_VERSION_0 = 0x7;
-  private static final long DCAM_VERSION_1 = 0x1000000;
+  private static final long DCIMG_VERSION_0 = 0x7;
+  private static final long DCIMG_VERSION_1 = 0x1000000;
 
-  private static final long DCIMG_PIXELTYPE_NONE = 0x00000000; // defined, but I don't know what to do with this
   private static final long DCIMG_PIXELTYPE_MONO8 = 0x00000001;
   private static final long DCIMG_PIXELTYPE_MONO16 = 0x00000002;
 
   // -- Fields --
 
-  private long sessionOffset;
+  private long headerSize;
   private long dataOffset;
   private long pixelType;
+  private int bytesPerImage;
   private int byteFactor;
 
   private List<String> companionFiles = new ArrayList<String>();
@@ -89,10 +90,14 @@ public class DCIMGReader extends FormatReader {
   {
     FormatTools.checkPlaneParameters(this, no, buf.length, x, y, w, h);
 
-    RandomAccessInputStream stream = new RandomAccessInputStream(uniqueFiles[no]);
+    int zp = no / getSizeT();
+    int tp = no % getSizeT();
+
+    RandomAccessInputStream stream = new RandomAccessInputStream(uniqueFiles[zp]);
+    stream.order(IS_LITTLE);
 
     // DCIMG is stored column major
-    stream.seek(sessionOffset + dataOffset + byteFactor*y*getSizeX());
+    stream.seek(headerSize + dataOffset + tp*bytesPerImage + byteFactor*y*getSizeX());
     for (int row=h-1; row>=0; row--) {
       stream.skipBytes(byteFactor*x);
       stream.read(buf, byteFactor*row*w, byteFactor*w);
@@ -118,19 +123,20 @@ public class DCIMGReader extends FormatReader {
     in.seek(8);
 
     long version = in.readUnsignedInt();  // DCIMG version number
-    if ((!(version == DCAM_VERSION_0)) && (!(version >= DCAM_VERSION_1))) {
+    LOGGER.info("DCIMG Version: {}", version);
+    if ((!(version == DCIMG_VERSION_0)) && (!(version >= DCIMG_VERSION_1))) {
       throw new FormatException(String.format("Unknown DCIMG version number %d.", version));
     }
 
-    if (version > DCAM_VERSION_1) {
-      LOGGER.warn(String.format("Your file is DCAM version %d, but only %d is guaranteed to work.", version, DCAM_VERSION_1));
+    if (version > DCIMG_VERSION_1) {
+      LOGGER.warn(String.format("Your file is DCAM version %d, but only %d is guaranteed to work.", version, DCIMG_VERSION_1));
     }
 
     in.skipBytes(20);
 
     long numSessions = in.readUnsignedInt();
     long numFrames = in.readUnsignedInt();
-    sessionOffset = in.readUnsignedInt();
+    headerSize = in.readUnsignedInt();
     in.skipBytes(4);
     long fileSize = in.readUnsignedInt();
     in.skipBytes(12);
@@ -151,9 +157,9 @@ public class DCIMGReader extends FormatReader {
     m.thumbnail = false;
     m.sizeC = 1;
 
-    if (version == DCAM_VERSION_0) {
+    if (version == DCIMG_VERSION_0) {
       parseDCAMVersion0Header(in);
-    } else if (version == DCAM_VERSION_1) {
+    } else if (version == DCIMG_VERSION_1) {
       parseDCAMVersion1Header(in);
     }
 
@@ -165,6 +171,7 @@ public class DCIMGReader extends FormatReader {
       byteFactor = 2;
     }
 
+    // Make the assumption that all files in the group have the same header
     if (isGroupFiles()) {
       Location currentFile = new Location(id).getAbsoluteFile();
       Location directory = currentFile.getParentFile();
@@ -176,9 +183,9 @@ public class DCIMGReader extends FormatReader {
 
     uniqueFiles = companionFiles.toArray(new String[companionFiles.size()]);
     m.sizeZ = uniqueFiles.length;
-    m.imageCount = getSizeZ() * getSizeC();
+    m.imageCount = getSizeZ() * getSizeT() * getSizeC();
 
-    LOGGER.debug("sizeX: {} sizeY: {} sizeZ: {} sizeC: {} sizeT: {}", m.sizeX, m.sizeY, m.sizeZ, m.sizeC, m.sizeT);
+    LOGGER.info("sizeX: {} sizeY: {} sizeZ: {} sizeC: {} sizeT: {}", m.sizeX, m.sizeY, m.sizeZ, m.sizeC, m.sizeT);
 
     addGlobalMeta("Version", version);
 
@@ -199,7 +206,7 @@ public class DCIMGReader extends FormatReader {
     Arrays.sort(files);
     for (String f : files) {
       String file = new Location(dir, f).getAbsolutePath();
-      LOGGER.debug("Checking file {}", file);
+      LOGGER.info("Checking file {}", file);
       addFileToList(file);
     }
   }
@@ -209,12 +216,12 @@ public class DCIMGReader extends FormatReader {
   {
     String ext = getExtension(file);
     if (!ext.equals("dcimg")) {
-      LOGGER.debug("File {} with extension {} failed extension check", file, ext);
+      LOGGER.warn("File {} with extension {} failed extension check", file, ext);
       return;
     }
     RandomAccessInputStream stream = new RandomAccessInputStream(file);
     if (!isThisType(stream)) {
-      LOGGER.debug("File {} is not DCIMG", file);
+      LOGGER.warn("File {} is not DCIMG", file);
       stream.close();
       return;
     }
@@ -239,21 +246,20 @@ public class DCIMGReader extends FormatReader {
   {
     CoreMetadata m = core.get(0);
 
-    stream.seek(sessionOffset);
+    stream.seek(headerSize);
     long sessionLength = stream.readUnsignedInt();
     stream.skipBytes(4);
     long pseudoOffset = stream.readUnsignedInt(); 
     stream.skipBytes(20);  
-    m.sizeT = (int) stream.readUnsignedInt();
-    pixelType = stream.readUnsignedInt();
+    m.sizeT = stream.readInt();
+    pixelType = stream.readInt();
     long mystery1 = stream.readUnsignedInt();
-    // TODO: This will fail for large numbers
-    m.sizeX = (int) stream.readUnsignedInt();  // num columns (this is a column-major format)
+    m.sizeX = stream.readInt();  // num columns (this is a column-major format)
     long bytesPerRow = stream.readUnsignedInt();
-    m.sizeY = (int) stream.readUnsignedInt();  // num rows
-    long bytesPerImage = stream.readUnsignedInt();
+    m.sizeY = stream.readInt();  // num rows
+    bytesPerImage = (int) stream.readUnsignedInt();
     stream.skipBytes(8);
-    dataOffset = stream.readUnsignedInt();
+    dataOffset = stream.readInt();
     long offsetToFooter = stream.readUnsignedInt();  /// TODO: Deal with footer
   }
 
@@ -262,21 +268,20 @@ public class DCIMGReader extends FormatReader {
   {
     CoreMetadata m = core.get(0);
 
-    stream.seek(sessionOffset);
+    stream.seek(headerSize);
     long sessionLength = stream.readUnsignedInt();
     stream.skipBytes(20);
     long pseudoOffset = stream.readUnsignedInt(); 
     stream.skipBytes(32);  // unknown numbers 1, 144, 65537
-    m.sizeT = (int) stream.readUnsignedInt();
-    pixelType = stream.readUnsignedInt();
+    m.sizeT = stream.readInt();
+    pixelType = stream.readInt();
     long mystery1 = stream.readUnsignedInt();
-    // TODO: This will fail for large numbers
-    m.sizeX = (int) stream.readUnsignedInt();  // num columns (this is a column-major format)
-    m.sizeY = (int) stream.readUnsignedInt();  // num rows
+    m.sizeX = stream.readInt();  // num columns (this is a column-major format)
+    m.sizeY = stream.readInt();  // num rows
     long bytesPerRow = stream.readUnsignedInt();
-    long bytesPerImage = stream.readUnsignedInt();
+    bytesPerImage = (int) stream.readUnsignedInt();
     stream.skipBytes(8);
-    dataOffset = stream.readUnsignedInt();
+    dataOffset = stream.readInt();
     stream.skipBytes(16);
     long bytesPerFrame = stream.readUnsignedInt();
   }
