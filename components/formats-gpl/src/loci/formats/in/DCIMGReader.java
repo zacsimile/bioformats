@@ -17,7 +17,7 @@ import loci.formats.meta.MetadataStore;
 /**
  * DCIMGReader reads Hamamatsu DCIMG files.
  * 
- * Follows spec at https://github.com/python-microscopy/python-microscopy/blob/master/PYME/IO/dcimg.py
+ * Follows spec/code at https://github.com/python-microscopy/python-microscopy/blob/master/PYME/IO/dcimg.py
  * and https://github.com/lens-biophotonics/dcimg/blob/master/dcimg.py.
  * 
  */
@@ -204,6 +204,8 @@ public class DCIMGReader extends FormatReader {
       byteFactor = 2;
     }
 
+    // DCIMG sometimes stores the first 4 pixels of one of its lines somewhere separate
+    // from the rest of the data.
     fourPixelCorrectionLine = getFourPixelCorrectionLine();
     fourPixelCorrectionOffset = getFourPixelCorrectionOffset();
 
@@ -233,7 +235,7 @@ public class DCIMGReader extends FormatReader {
 
   }
 
-  /* Logic copied from DicomReader */
+  // Logic copied from DicomReader 
   private void scanDirectory(Location dir)
     throws FormatException, IOException 
   {
@@ -247,6 +249,7 @@ public class DCIMGReader extends FormatReader {
     }
   }
 
+  // Logic copied from DicomReader 
   private void addFileToList(String file)
     throws FormatException, IOException
   {
@@ -262,11 +265,12 @@ public class DCIMGReader extends FormatReader {
       return;
     }
     // stream.order(IS_LITTLE);
-    // now check width/height
+    // TODO: now check width/height
     companionFiles.add(file);
     stream.close();
   }
 
+  // TODO: Surely this exists somewhere else?
   private String getExtension(String file)
   {
     String ext = "";
@@ -277,6 +281,7 @@ public class DCIMGReader extends FormatReader {
     return ext;
   }
 
+  // The header and footer code feature many commented out properties "for later"
   private void parseDCAMVersion0Header(RandomAccessInputStream stream)
     throws IOException 
   {
@@ -365,6 +370,7 @@ public class DCIMGReader extends FormatReader {
     }
   }
 
+  // Get the correct line and offset for the 4 pixel correction
   private int getFourPixelCorrectionLine() 
   {
     if (version == DCIMG_VERSION_0) {
@@ -390,4 +396,5 @@ public class DCIMGReader extends FormatReader {
     }
     return headerSize + dataOffset + bytesPerImage + 12;
   }
+
 }
