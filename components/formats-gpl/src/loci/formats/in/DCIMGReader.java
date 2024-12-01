@@ -19,6 +19,7 @@ import loci.formats.meta.MetadataStore;
  * 
  * Follows spec at https://github.com/python-microscopy/python-microscopy/blob/master/PYME/IO/dcimg.py
  * and https://github.com/lens-biophotonics/dcimg/blob/master/dcimg.py.
+ * 
  */
 public class DCIMGReader extends FormatReader {
 
@@ -34,11 +35,21 @@ public class DCIMGReader extends FormatReader {
 
   // -- Fields --
 
+  private long version;
   private long headerSize;
   private long dataOffset;
   private long pixelType;
-  private int bytesPerImage;
+  private long bytesPerImage;
+  private long bytesPerRow;
   private int byteFactor;
+  private long offsetToFooter;
+  private boolean fourPixelCorrectionInFooter = false;
+  private long offsetToFourPixels;
+  private long fourPixelOffsetInFrame;
+  private int fourPixelCorrectionLine;
+  private long fourPixelCorrectionOffset;
+  private long currentStreamPosition;
+  private long frameFooterSize;
 
   private List<String> companionFiles = new ArrayList<String>();
   private String[] uniqueFiles;
@@ -99,8 +110,26 @@ public class DCIMGReader extends FormatReader {
     // DCIMG is stored column major
     stream.seek(headerSize + dataOffset + tp*bytesPerImage + byteFactor*y*getSizeX());
     for (int row=h-1; row>=0; row--) {
-      stream.skipBytes(byteFactor*x);
-      stream.read(buf, byteFactor*row*w, byteFactor*w);
+      if (fourPixelCorrectionInFooter && (row == fourPixelCorrectionLine) && (x < 4)) {
+
+        // mark the current position, as we want to pick up from here
+        currentStreamPosition = stream.getFilePointer();
+
+        // go get the four pixel offset
+        stream.seek(fourPixelCorrectionOffset);
+        stream.skip(byteFactor*x);
+        stream.read(buf, byteFactor*row*w, byteFactor*(4-x));
+
+        // go back to our current position, plus four pixels
+        stream.seek(currentStreamPosition);
+        stream.skipBytes(byteFactor*4);
+
+        // continue reading
+        stream.read(buf, byteFactor*(row*w+4), byteFactor*(w-4));
+      } else {
+        stream.skipBytes(byteFactor*x);
+        stream.read(buf, byteFactor*row*w, byteFactor*w);
+      }
       stream.skipBytes(byteFactor*(getSizeX() - w - x));
     }
 
@@ -122,7 +151,7 @@ public class DCIMGReader extends FormatReader {
 
     in.seek(8);
 
-    long version = in.readUnsignedInt();  // DCIMG version number
+    version = in.readUnsignedInt();  // DCIMG version number
     LOGGER.info("DCIMG Version: {}", version);
     if ((!(version == DCIMG_VERSION_0)) && (!(version >= DCIMG_VERSION_1))) {
       throw new FormatException(String.format("Unknown DCIMG version number %d.", version));
@@ -134,8 +163,8 @@ public class DCIMGReader extends FormatReader {
 
     in.skipBytes(20);
 
-    long numSessions = in.readUnsignedInt();
-    long numFrames = in.readUnsignedInt();
+    in.skipBytes(4);  // long numSessions = in.readUnsignedInt();
+    in.skipBytes(4);  // long numFrames = in.readUnsignedInt();
     headerSize = in.readUnsignedInt();
     in.skipBytes(4);
     long fileSize = in.readUnsignedInt();
@@ -143,7 +172,7 @@ public class DCIMGReader extends FormatReader {
     long fileSize2 = in.readUnsignedInt();
     if (fileSize != fileSize2) throw new FormatException("Improper header. File sizes do not match.");
     in.skipBytes(16);
-    long mystery1 = in.readUnsignedInt();  // 1024 in all examples
+    // long mystery1 = in.readUnsignedInt();  // 1024 in all examples
 
     CoreMetadata m = core.get(0);
 
@@ -155,10 +184,14 @@ public class DCIMGReader extends FormatReader {
     m.falseColor = false;
     m.metadataComplete = true;
     m.thumbnail = false;
-    m.sizeC = 1;
+    m.sizeC = 1;  // AFAIK DCIMG are always grayscale
 
+    // One shot header reading to avoid lots of control flow statements (because of
+    // the different DCIMG versions). Unfortunately, a bit less clean than parsing
+    // each parameter individually.
     if (version == DCIMG_VERSION_0) {
       parseDCAMVersion0Header(in);
+      parseDCAMVersion0Footer(in);
     } else if (version == DCIMG_VERSION_1) {
       parseDCAMVersion1Header(in);
     }
@@ -170,6 +203,9 @@ public class DCIMGReader extends FormatReader {
       m.pixelType = FormatTools.UINT16;
       byteFactor = 2;
     }
+
+    fourPixelCorrectionLine = getFourPixelCorrectionLine();
+    fourPixelCorrectionOffset = getFourPixelCorrectionOffset();
 
     // Make the assumption that all files in the group have the same header
     if (isGroupFiles()) {
@@ -247,20 +283,19 @@ public class DCIMGReader extends FormatReader {
     CoreMetadata m = core.get(0);
 
     stream.seek(headerSize);
-    long sessionLength = stream.readUnsignedInt();
-    stream.skipBytes(4);
-    long pseudoOffset = stream.readUnsignedInt(); 
-    stream.skipBytes(20);  
+    // long sessionLength = stream.readLong();
+    // stream.skipBytes(24);
+    stream.skipBytes(32);
     m.sizeT = stream.readInt();
     pixelType = stream.readInt();
-    long mystery1 = stream.readUnsignedInt();
+    stream.skipBytes(4);  // long mystery1 = stream.readUnsignedInt();
     m.sizeX = stream.readInt();  // num columns (this is a column-major format)
-    long bytesPerRow = stream.readUnsignedInt();
+    bytesPerRow = stream.readUnsignedInt();
     m.sizeY = stream.readInt();  // num rows
-    bytesPerImage = (int) stream.readUnsignedInt();
+    bytesPerImage = stream.readUnsignedInt();
     stream.skipBytes(8);
     dataOffset = stream.readInt();
-    long offsetToFooter = stream.readUnsignedInt();  /// TODO: Deal with footer
+    offsetToFooter = stream.readLong();
   }
 
   private void parseDCAMVersion1Header(RandomAccessInputStream stream)
@@ -269,20 +304,90 @@ public class DCIMGReader extends FormatReader {
     CoreMetadata m = core.get(0);
 
     stream.seek(headerSize);
-    long sessionLength = stream.readUnsignedInt();
-    stream.skipBytes(20);
-    long pseudoOffset = stream.readUnsignedInt(); 
-    stream.skipBytes(32);  // unknown numbers 1, 144, 65537
+    stream.skipBytes(8);  // long sessionLength = stream.readLong();
+    stream.skipBytes(52);  // unknown numbers 1, 144, 65537
     m.sizeT = stream.readInt();
     pixelType = stream.readInt();
-    long mystery1 = stream.readUnsignedInt();
+    stream.skipBytes(4); // long mystery1 = stream.readUnsignedInt();
     m.sizeX = stream.readInt();  // num columns (this is a column-major format)
     m.sizeY = stream.readInt();  // num rows
-    long bytesPerRow = stream.readUnsignedInt();
-    bytesPerImage = (int) stream.readUnsignedInt();
+    stream.skipBytes(4); // long bytesPerRow = stream.readUnsignedInt();
+    bytesPerImage = stream.readUnsignedInt();
     stream.skipBytes(8);
-    dataOffset = stream.readInt();
+    dataOffset = stream.readLong();
+    stream.skipBytes(20);
+    frameFooterSize = stream.readUnsignedInt();
+  }
+
+  private void parseDCAMVersion0Footer(RandomAccessInputStream stream) 
+    throws IOException, FormatException
+  {
+    // Go to the first footer and find out where the second footer is
+    long footerOffset = headerSize + offsetToFooter;
+    stream.seek(footerOffset);
+    long footerVersion = stream.readUnsignedInt();
+    if (version != footerVersion) {
+      throw new FormatException(String.format("Header DCIMG version %d does not match footer version %d.", footerVersion, version));
+    }
+    stream.skipBytes(4);
+    long secondFooterOffset = stream.readLong();
+    // stream.skipBytes(8);
+    // long offsetToOffsetToEndOfData = stream.readLong();
+    // stream.skipBytes(8);
+    // long footerSize = stream.readUnsignedInt();
+    // stream.skipBytes(4);
+    // long secondFooterSize = stream.readUnsignedInt();
+    // stream.skipBytes(76);
+    // long offsetToEndOfData = stream.readLong();
+    // stream.skipBytes(8);
+    // long offsetToEndOfData2 = stream.readLong();
+    // stream.skipBytes(8);
+
+    // Go to the second footer and get information about the 4px offset
+    stream.seek(footerOffset+secondFooterOffset);
+    // long offsetToOffsetToTimestamps = stream.readLong();
+    // stream.skipBytes(8);
+    // long offsetToOffsetToFrameCounts = stream.readLong();
+    // stream.skipBytes(8);
+    // long offsetToOffsetToFourPixels = stream.readLong();
+    // stream.skipBytes(8);
+    // long offsetToFrameCounts = stream.readLong();
+    // stream.skipBytes(8);
+    // long offsetToTimestamps = stream.readLong();
+    stream.skipBytes(72);
     stream.skipBytes(16);
-    long bytesPerFrame = stream.readUnsignedInt();
+    offsetToFourPixels = stream.readLong();
+    stream.skipBytes(4);
+    fourPixelOffsetInFrame = stream.readUnsignedInt();
+    long fourPixelSize = stream.readLong();
+    if (fourPixelSize > 0) {
+      fourPixelCorrectionInFooter = true;
+    }
+  }
+
+  private int getFourPixelCorrectionLine() 
+  {
+    if (version == DCIMG_VERSION_0) {
+      if (fourPixelCorrectionInFooter) {
+        return ((int)(fourPixelOffsetInFrame / bytesPerRow + 1));  // TODO: Why do we need the +1?
+      } else {
+        return (getSizeX() - 1);
+      }
+    }
+    if (version == DCIMG_VERSION_1) {
+      if (frameFooterSize >= 512) {
+        fourPixelCorrectionInFooter = true;
+      }
+      return (getSizeY() / 2);  // TODO: is this legal?
+    }
+    return 0;
+  }
+
+  private long getFourPixelCorrectionOffset()
+  {
+    if (version == DCIMG_VERSION_0) {
+      return headerSize + offsetToFooter + offsetToFourPixels;
+    }
+    return headerSize + dataOffset + bytesPerImage + 12;
   }
 }
