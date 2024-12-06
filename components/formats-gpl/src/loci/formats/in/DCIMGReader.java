@@ -13,7 +13,6 @@ import loci.formats.FormatReader;
 import loci.formats.FormatTools;
 import loci.formats.MetadataTools;
 import loci.formats.meta.MetadataStore;
-import ucar.nc2.util.IO;
 
 /**
  * DCIMGReader reads Hamamatsu DCIMG files.
@@ -373,7 +372,6 @@ public class DCIMGReader extends FormatReader {
 
   // Get the correct line and offset for the 4 pixel correction
   private int getFourPixelCorrectionLine() 
-    throws IOException
   {
     if (version == DCIMG_VERSION_0) {
       if (fourPixelCorrectionInFooter) {
