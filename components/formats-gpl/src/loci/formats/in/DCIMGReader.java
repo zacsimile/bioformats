@@ -13,6 +13,7 @@ import loci.formats.FormatReader;
 import loci.formats.FormatTools;
 import loci.formats.MetadataTools;
 import loci.formats.meta.MetadataStore;
+import ucar.nc2.util.IO;
 
 /**
  * DCIMGReader reads Hamamatsu DCIMG files.
@@ -372,19 +373,28 @@ public class DCIMGReader extends FormatReader {
 
   // Get the correct line and offset for the 4 pixel correction
   private int getFourPixelCorrectionLine() 
+    throws IOException
   {
     if (version == DCIMG_VERSION_0) {
       if (fourPixelCorrectionInFooter) {
         return ((int)(fourPixelOffsetInFrame / bytesPerRow + 1));  // TODO: Why do we need the +1?
       } else {
-        return (getSizeX() - 1);
+        return (getSizeY() - 1);
       }
     }
     if (version == DCIMG_VERSION_1) {
-      if (frameFooterSize >= 512) {
+      if ((frameFooterSize >= 512) | (frameFooterSize == 32)){
         fourPixelCorrectionInFooter = true;
       }
-      return (getSizeY() / 2);  // TODO: is this legal?
+
+      // TODO: This is a guess because the spec in 
+      // https://github.com/lens-biophotonics/dcimg/blob/master/dcimg.py
+      // resulted in a div by zero on my example file.
+      if ((getSizeY() % 2) == 0) {
+        return (getSizeY() / 2);
+      } else {
+        return (getSizeY() / 2 + 1);
+      }
     }
     return 0;
   }
