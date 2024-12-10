@@ -1,3 +1,28 @@
+/*
+ * #%L
+ * OME Bio-Formats package for reading and converting biological file formats.
+ * %%
+ * Copyright (C) 2005 - 2024 Open Microscopy Environment:
+ *   - Board of Regents of the University of Wisconsin-Madison
+ *   - Glencoe Software, Inc.
+ *   - University of Dundee
+ * %%
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as
+ * published by the Free Software Foundation, either version 2 of the 
+ * License, or (at your option) any later version.
+ * 
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ * 
+ * You should have received a copy of the GNU General Public 
+ * License along with this program.  If not, see
+ * <http://www.gnu.org/licenses/gpl-2.0.html>.
+ * #L%
+ */
+
 package loci.formats.in;
 
 import java.io.IOException;
@@ -41,7 +66,6 @@ public class DCIMGReader extends FormatReader {
   private long pixelType;
   private long bytesPerImage;
   private long bytesPerRow;
-  private int byteFactor;
   private long offsetToFooter;
   private boolean fourPixelCorrectionInFooter = false;
   private long offsetToFourPixels;
@@ -80,8 +104,6 @@ public class DCIMGReader extends FormatReader {
   {
     FormatTools.assertId(currentId, true, 1);
 
-    if (!isGroupFiles() || noPixels) return null;
-
     return uniqueFiles;
 
   }
@@ -91,8 +113,8 @@ public class DCIMGReader extends FormatReader {
     throws IOException 
   {
     String desc = stream.readString(5);
-    if (!desc.equals("DCIMG")) return false;
-    return true;
+
+    return desc.equals("DCIMG");
   }
   
   @Override
@@ -104,36 +126,35 @@ public class DCIMGReader extends FormatReader {
     int zp = no / getSizeT();
     int tp = no % getSizeT();
 
-    RandomAccessInputStream stream = new RandomAccessInputStream(uniqueFiles[zp]);
-    stream.order(IS_LITTLE);
+    try (RandomAccessInputStream stream = new RandomAccessInputStream(uniqueFiles[zp])) {
+      stream.order(IS_LITTLE);
 
-    // DCIMG is stored column major
-    stream.seek(headerSize + dataOffset + tp*bytesPerImage + byteFactor*y*getSizeX());
-    for (int row=h-1; row>=0; row--) {
-      if (fourPixelCorrectionInFooter && (row == fourPixelCorrectionLine) && (x < 4)) {
+      // DCIMG is stored column major
+      int byteFactor = FormatTools.getBytesPerPixel(getPixelType());
+      stream.seek(headerSize + dataOffset + tp*bytesPerImage + byteFactor*y*getSizeX());
+      for (int row=h-1; row>=0; row--) {
+        if (fourPixelCorrectionInFooter && (row == fourPixelCorrectionLine) && (x < 4)) {
 
-        // mark the current position, as we want to pick up from here
-        currentStreamPosition = stream.getFilePointer();
+          // mark the current position, as we want to pick up from here
+          currentStreamPosition = stream.getFilePointer();
 
-        // go get the four pixel offset
-        stream.seek(fourPixelCorrectionOffset);
-        stream.skip(byteFactor*x);
-        stream.read(buf, byteFactor*row*w, byteFactor*(4-x));
+          // go get the four pixel offset
+          stream.seek(fourPixelCorrectionOffset + byteFactor*x);
+          stream.read(buf, byteFactor*row*w, byteFactor*(4-x));
 
-        // go back to our current position, plus four pixels
-        stream.seek(currentStreamPosition);
-        stream.skipBytes(byteFactor*4);
+          // go back to our current position, plus four pixels
+          stream.seek(currentStreamPosition + byteFactor*4);
 
-        // continue reading
-        stream.read(buf, byteFactor*(row*w+4), byteFactor*(w-4));
-      } else {
-        stream.skipBytes(byteFactor*x);
-        stream.read(buf, byteFactor*row*w, byteFactor*w);
+          // continue reading
+          stream.read(buf, byteFactor*(row*w+4), byteFactor*(w-4));
+        } else {
+          stream.skipBytes(byteFactor*x);
+          stream.read(buf, byteFactor*row*w, byteFactor*w);
+        }
+        stream.skipBytes(byteFactor*(getSizeX() - w - x));
       }
-      stream.skipBytes(byteFactor*(getSizeX() - w - x));
     }
 
-    stream.close();
     return buf;
   }
 
@@ -161,10 +182,11 @@ public class DCIMGReader extends FormatReader {
       LOGGER.warn(String.format("Your file is DCAM version %d, but only %d is guaranteed to work.", version, DCIMG_VERSION_1));
     }
 
-    in.skipBytes(20);
+    // in.skipBytes(20);
 
-    in.skipBytes(4);  // long numSessions = in.readUnsignedInt();
-    in.skipBytes(4);  // long numFrames = in.readUnsignedInt();
+    // in.skipBytes(4);  // long numSessions = in.readUnsignedInt();
+    // in.skipBytes(4);  // long numFrames = in.readUnsignedInt();
+    in.skipBytes(28);
     headerSize = in.readUnsignedInt();
     in.skipBytes(4);
     long fileSize = in.readUnsignedInt();
@@ -198,10 +220,10 @@ public class DCIMGReader extends FormatReader {
 
     if (pixelType == DCIMG_PIXELTYPE_MONO8) {
       m.pixelType = FormatTools.UINT8;
-      byteFactor = 1;
     } else if (pixelType == DCIMG_PIXELTYPE_MONO16) {
       m.pixelType = FormatTools.UINT16;
-      byteFactor = 2;
+    } else {
+      throw new FormatException(String.format("Unknown pixel type %d.", pixelType));
     }
 
     // DCIMG sometimes stores the first 4 pixels of one of its lines somewhere separate
@@ -253,32 +275,19 @@ public class DCIMGReader extends FormatReader {
   private void addFileToList(String file)
     throws FormatException, IOException
   {
-    String ext = getExtension(file);
-    if (!ext.equals("dcimg")) {
-      LOGGER.warn("File {} with extension {} failed extension check", file, ext);
+    if (!checkSuffix(file, "dcimg")) {
+      LOGGER.warn("File {} failed extension check. Does not end in 'dcimg'.", file);
       return;
     }
-    RandomAccessInputStream stream = new RandomAccessInputStream(file);
-    if (!isThisType(stream)) {
-      LOGGER.warn("File {} is not DCIMG", file);
-      stream.close();
-      return;
+    try (RandomAccessInputStream stream = new RandomAccessInputStream(file)) {
+      if (!isThisType(stream)) {
+        LOGGER.warn("File {} is not DCIMG.", file);
+        return;
+      }
+      // stream.order(IS_LITTLE);
+      // TODO: now check width/height
+      companionFiles.add(file);
     }
-    // stream.order(IS_LITTLE);
-    // TODO: now check width/height
-    companionFiles.add(file);
-    stream.close();
-  }
-
-  // TODO: Surely this exists somewhere else?
-  private String getExtension(String file)
-  {
-    String ext = "";
-    int i = file.lastIndexOf(".");
-    if (i > 0) {
-      ext = file.substring(i+1);
-    }
-    return ext;
   }
 
   // The header and footer code feature many commented out properties "for later"
@@ -309,8 +318,9 @@ public class DCIMGReader extends FormatReader {
     CoreMetadata m = core.get(0);
 
     stream.seek(headerSize);
-    stream.skipBytes(8);  // long sessionLength = stream.readLong();
-    stream.skipBytes(52);  // unknown numbers 1, 144, 65537
+    // stream.skipBytes(8);  // long sessionLength = stream.readLong();
+    // stream.skipBytes(52);  // unknown numbers 1, 144, 65537
+    stream.skipBytes(60);
     m.sizeT = stream.readInt();
     pixelType = stream.readInt();
     stream.skipBytes(4); // long mystery1 = stream.readUnsignedInt();
@@ -359,8 +369,8 @@ public class DCIMGReader extends FormatReader {
     // long offsetToFrameCounts = stream.readLong();
     // stream.skipBytes(8);
     // long offsetToTimestamps = stream.readLong();
-    stream.skipBytes(72);
-    stream.skipBytes(16);
+    // stream.skipBytes(16);
+    stream.skipBytes(88);
     offsetToFourPixels = stream.readLong();
     stream.skipBytes(4);
     fourPixelOffsetInFrame = stream.readUnsignedInt();
@@ -403,6 +413,29 @@ public class DCIMGReader extends FormatReader {
       return headerSize + offsetToFooter + offsetToFourPixels;
     }
     return headerSize + dataOffset + bytesPerImage + 12;
+  }
+
+  public void close(boolean fileOnly) throws IOException {
+    super.close(fileOnly);
+    if (!fileOnly) {
+      version = 0;
+      headerSize = 0;
+      dataOffset = 0;
+      pixelType = 0;
+      bytesPerImage = 0;
+      bytesPerRow = 0;
+      offsetToFooter = 0;
+      fourPixelCorrectionInFooter = false;
+      offsetToFourPixels = 0;
+      fourPixelOffsetInFrame = 0;
+      fourPixelCorrectionLine = 0;
+      fourPixelCorrectionOffset = 0;
+      currentStreamPosition = 0;
+      frameFooterSize = 0;
+      
+      companionFiles.clear();
+      uniqueFiles = null;
+    }
   }
 
 }
